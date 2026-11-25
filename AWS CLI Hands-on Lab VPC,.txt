@@ -1,0 +1,135 @@
+AWS CLI Hands-on Lab: VPC,
+Public & Private Subnets, EC2
+Ubuntu terminal | AWS CLI v2 | ap-south-1 (Mumbai) | Profile: mc-aws-sbx
+Goal: Create one VPC (10.0.0.0/16), one public subnet (10.0.1.0/24), one private subnet (10.0.2.0/24),
+Internet Gateway, route tables, security group, and one EC2 instance in the public subnet. The private
+subnet has no direct internet route. Execute each command separately in the SAME Ubuntu terminal.
+Security & cost: EC2 and public IPv4 may incur charges. SSH is limited to your current public IP. Never
+upload or share your private key. Delete resources after practice.
+1. Check AWS CLI and configure the shell
+AWS CLI v2 must already be installed and the mc-aws-sbx profile configured. Use aws configure --profile
+mc-aws-sbx if needed. Your identity must have permission to create EC2/VPC resources.
+aws --version
+aws configure list --profile mc-aws-sbx
+export AWS_PROFILE=mc-aws-sbx
+export AWS_DEFAULT_REGION=ap-south-1
+export AZ=ap-south-1a
+aws sts get-caller-identity
+The exported profile and region apply to all subsequent aws commands; this is equivalent to including
+--profile mc-aws-sbx --region ap-south-1 on each call.
+2. Create VPC and enable DNS
+VPC_ID=$(aws ec2 create-vpc --cidr-block 10.0.0.0/16 --query 'Vpc.VpcId' --output text)
+echo "$VPC_ID"
+aws ec2 create-tags --resources "$VPC_ID" --tags Key=Name,Value=mc-cli-practice-vpc
+aws ec2 modify-vpc-attribute --vpc-id "$VPC_ID" --enable-dns-support
+aws ec2 modify-vpc-attribute --vpc-id "$VPC_ID" --enable-dns-hostnames
+3. Create public and private subnets
+PUBLIC_SUBNET=$(aws ec2 create-subnet --vpc-id "$VPC_ID" --cidr-block 10.0.1.0/24
+--availability-zone "$AZ" --query 'Subnet.SubnetId' --output text)
+aws ec2 create-tags --resources "$PUBLIC_SUBNET" --tags Key=Name,Value=mc-public-subnet
+PRIVATE_SUBNET=$(aws ec2 create-subnet --vpc-id "$VPC_ID" --cidr-block 10.0.2.0/24
+--availability-zone "$AZ" --query 'Subnet.SubnetId' --output text)
+aws ec2 create-tags --resources "$PRIVATE_SUBNET" --tags Key=Name,Value=mc-private-subnet
+aws ec2 modify-subnet-attribute --subnet-id "$PUBLIC_SUBNET" --map-public-ip-on-launch
+ 
+AWS CLI • Ubuntu • Single-VPC practice lab
+aws ec2 describe-subnets --subnet-ids "$PUBLIC_SUBNET" "$PRIVATE_SUBNET" --query
+"Subnets[*].[SubnetId,CidrBlock,AvailabilityZone,MapPublicIpOnLaunch]" --output table
+4. Create and attach Internet Gateway
+IGW_ID=$(aws ec2 create-internet-gateway --query 'InternetGateway.InternetGatewayId'
+--output text)
+aws ec2 create-tags --resources "$IGW_ID" --tags Key=Name,Value=mc-practice-igw
+aws ec2 attach-internet-gateway --internet-gateway-id "$IGW_ID" --vpc-id "$VPC_ID"
+5. Create public route table and route to IGW
+PUBLIC_RT=$(aws ec2 create-route-table --vpc-id "$VPC_ID" --query
+'RouteTable.RouteTableId' --output text)
+aws ec2 create-tags --resources "$PUBLIC_RT" --tags Key=Name,Value=mc-public-rt
+aws ec2 create-route --route-table-id "$PUBLIC_RT" --destination-cidr-block 0.0.0.0/0
+--gateway-id "$IGW_ID"
+PUBLIC_ASSOC=$(aws ec2 associate-route-table --route-table-id "$PUBLIC_RT" --subnet-id
+"$PUBLIC_SUBNET" --query AssociationId --output text)
+6. Create private route table (local routing only)
+PRIVATE_RT=$(aws ec2 create-route-table --vpc-id "$VPC_ID" --query
+'RouteTable.RouteTableId' --output text)
+aws ec2 create-tags --resources "$PRIVATE_RT" --tags Key=Name,Value=mc-private-rt
+PRIVATE_ASSOC=$(aws ec2 associate-route-table --route-table-id "$PRIVATE_RT" --subnet-id
+"$PRIVATE_SUBNET" --query AssociationId --output text)
+Do not add 0.0.0.0/0 to the private route table. Its automatic 10.0.0.0/16 → local route permits
+communication within the VPC. A NAT Gateway or VPC endpoints would be needed for some private-subnet
+outbound use cases; neither is required for this lab.
+7. Create a security group for public EC2 SSH access
+SG_ID=$(aws ec2 create-security-group --group-name mc-public-ec2-sg --description 'SSH
+from my current IP only' --vpc-id "$VPC_ID" --query GroupId --output text)
+MY_IP=$(curl -fsSL https://checkip.amazonaws.com | tr -d "\r\n")
+echo "$MY_IP"
+aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 22
+--cidr "$MY_IP/32"
+If your Ubuntu terminal runs on a remote VM or your public IP changes, the SSH rule must match the actual
+client IP used for SSH. Default security group egress allows outbound traffic.
+ 
+AWS CLI • Ubuntu • Single-VPC practice lab
+8. Create SSH key pair
+aws ec2 create-key-pair --key-name mc-cli-practice-key --query KeyMaterial --output text
+> mc-cli-practice-key.pem
+chmod 400 mc-cli-practice-key.pem
+Run in a secure working directory. The PEM file is shown only at key creation; retain it securely. If the key
+pair already exists, choose a different name or reuse its existing private key.
+9. Find Amazon Linux 2023 AMI and launch EC2
+AMI_ID=$(aws ssm get-parameter --name
+/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --query
+'Parameter.Value' --output text)
+echo "$AMI_ID"
+INSTANCE_ID=$(aws ec2 run-instances --image-id "$AMI_ID" --instance-type t3.micro
+--subnet-id "$PUBLIC_SUBNET" --security-group-ids "$SG_ID" --key-name mc-cli-practice-key
+--associate-public-ip-address --tag-specifications
+'ResourceType=instance,Tags=[{Key=Name,Value=mc-cli-public-ec2}]' --query
+'Instances[0].InstanceId' --output text)
+echo "$INSTANCE_ID"
+aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+PUBLIC_IP=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query
+'Reservations[0].Instances[0].PublicIpAddress' --output text)
+echo "$PUBLIC_IP"
+If t3.micro is unavailable or your account has a different instance-size allowance, choose an allowed
+instance type. A public IPv4 address can incur charges.
+10. Connect to the instance and verify
+ssh -i mc-cli-practice-key.pem ec2-user@"$PUBLIC_IP"
+Run the next two commands INSIDE EC2 after SSH connects:
+hostname
+curl -I https://example.com
+Exit the EC2 session to return to your Ubuntu machine:
+exit
+Verify routes and instance information from your local Ubuntu shell:
+aws ec2 describe-route-tables --route-table-ids "$PUBLIC_RT" "$PRIVATE_RT" --output table
+aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query
+"Reservations[*].Instances[*].[InstanceId,State.Name,PrivateIpAddress,PublicIpAddress]"
+--output table
+11. Cleanup (execute after practice, in order)
+Do not run cleanup until you finish. These commands delete the resources created above.
+ 
+AWS CLI • Ubuntu • Single-VPC practice lab
+aws ec2 terminate-instances --instance-ids "$INSTANCE_ID"
+aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID"
+aws ec2 delete-security-group --group-id "$SG_ID"
+aws ec2 disassociate-route-table --association-id "$PUBLIC_ASSOC"
+aws ec2 disassociate-route-table --association-id "$PRIVATE_ASSOC"
+aws ec2 delete-route-table --route-table-id "$PUBLIC_RT"
+aws ec2 delete-route-table --route-table-id "$PRIVATE_RT"
+aws ec2 detach-internet-gateway --internet-gateway-id "$IGW_ID" --vpc-id "$VPC_ID"
+aws ec2 delete-internet-gateway --internet-gateway-id "$IGW_ID"
+aws ec2 delete-subnet --subnet-id "$PUBLIC_SUBNET"
+aws ec2 delete-subnet --subnet-id "$PRIVATE_SUBNET"
+aws ec2 delete-vpc --vpc-id "$VPC_ID"
+aws ec2 delete-key-pair --key-name mc-cli-practice-key
+rm -f mc-cli-practice-key.pem
+If a command returns DependencyViolation, wait briefly and retry after confirming no other resources remain.
+Never delete a key pair used by other instances.
+12. Assignment checklist
+☐ VPC created with 10.0.0.0/16
+☐ Public and private subnets created in same AZ
+☐ IGW attached and public default route configured
+☐ Private route table contains local route only
+☐ Security group limits SSH to client IP
+☐ EC2 running in public subnet with public IP
+☐ SSH and HTTPS test completed
+☐ All resources cleaned up
+ 
