@@ -1,0 +1,173 @@
+MULTI-CLOUD TRAINING - UBUNTU DEPENDENCY INSTALLATION GUIDE
+
+This guide installs and verifies: 1. AWS CLI v2 2. Azure CLI 3. Google
+Cloud CLI (gcloud) 4. Terraform 5. Checkov 6. Git
+
+IMPORTANT
+
+Run these commands on an Ubuntu Linux machine (including Ubuntu EC2).
+The commands below use official vendor repositories/installers where
+possible. You may be prompted for your sudo password.
+
+1. UPDATE UBUNTU AND INSTALL BASIC DEPENDENCIES
+
+sudo apt update sudo apt upgrade -y
+
+sudo apt install -y
+curl
+wget
+unzip
+gnupg
+software-properties-common
+apt-transport-https
+ca-certificates
+lsb-release
+git
+python3
+python3-pip
+python3-venv
+
+2. INSTALL AWS CLI VERSION 2
+
+For x86_64 / AMD64 Ubuntu machines:
+
+curl “https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip” -o
+“awscliv2.zip” unzip awscliv2.zip sudo ./aws/install
+
+Verify: aws –version
+
+Expected output format: aws-cli/2.x.x Python/3.x.x Linux/x.x.x
+
+For ARM64 / aarch64 machines, use the ARM64 installer instead: curl
+“https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip” -o
+“awscliv2.zip”
+
+Then unzip and install using the same commands: unzip awscliv2.zip sudo
+./aws/install
+
+3. INSTALL AZURE CLI
+
+sudo mkdir -p /etc/apt/keyrings
+
+curl -sLS https://packages.microsoft.com/keys/microsoft.asc |
+gpg –dearmor |
+sudo tee /etc/apt/keyrings/microsoft.gpg > /dev/null
+
+sudo chmod go+r /etc/apt/keyrings/microsoft.gpg
+
+AZ_DIST=$(lsb_release -cs)
+
+echo “Types: deb URIs: https://packages.microsoft.com/repos/azure-cli/
+Suites: ${AZ_DIST} Components: main Architectures: $(dpkg
+–print-architecture) Signed-By: /etc/apt/keyrings/microsoft.gpg” |
+sudo tee /etc/apt/sources.list.d/azure-cli.sources
+
+sudo apt update sudo apt install -y azure-cli
+
+Verify: az version –output table
+
+4. INSTALL GOOGLE CLOUD CLI (GCLOUD)
+
+sudo mkdir -p /usr/share/keyrings
+
+curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg |
+sudo gpg –dearmor -o /usr/share/keyrings/cloud.google.gpg
+
+echo “deb [signed-by=/usr/share/keyrings/cloud.google.gpg]
+https://packages.cloud.google.com/apt cloud-sdk main” |
+sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
+
+sudo apt update sudo apt install -y google-cloud-cli
+
+Verify: gcloud –version
+
+5. INSTALL TERRAFORM
+
+wget -O- https://apt.releases.hashicorp.com/gpg |
+gpg –dearmor |
+sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null
+
+echo “deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg]
+https://apt.releases.hashicorp.com
+$(. /etc/os-release && echo "$VERSION_CODENAME”) main” |
+sudo tee /etc/apt/sources.list.d/hashicorp.list
+
+sudo apt update sudo apt install -y terraform
+
+Verify: terraform version
+
+6. INSTALL CHECKOV
+
+Use pipx to install Checkov in an isolated Python environment.
+
+sudo apt install -y pipx pipx ensurepath pipx install checkov
+
+If the checkov command is not found, reload the shell: source ~/.bashrc
+
+Verify: checkov –version
+
+7. INSTALL GIT
+
+sudo apt install -y git
+
+Verify: git –version
+
+8. VERIFY ALL SIX DEPENDENCIES
+
+Run this block after completing the installations:
+
+echo “================================” echo “1. AWS CLI” echo
+“================================” aws –version
+
+echo “================================” echo “2. Azure CLI” echo
+“================================” az version –output table
+
+echo “================================” echo “3. Google Cloud CLI” echo
+“================================” gcloud –version
+
+echo “================================” echo “4. Terraform” echo
+“================================” terraform version
+
+echo “================================” echo “5. Checkov” echo
+“================================” checkov –version
+
+echo “================================” echo “6. Git” echo
+“================================” git –version
+
+echo “================================” echo “INSTALLATION VERIFICATION
+COMPLETED” echo “================================”
+
+9. WHAT EACH TOOL IS USED FOR
+
+AWS CLI - Manage AWS resources from the terminal. Azure CLI - Manage
+Azure resources. Google Cloud - Manage GCP resources. Terraform -
+Provision infrastructure using Infrastructure as Code (IaC). Checkov -
+Scan Terraform and other IaC configurations for security/compliance
+issues. Git - Track changes and manage source code versions.
+
+10. AUTHENTICATION IS A SEPARATE STEP
+
+Installing the tools does not automatically sign you in to cloud
+accounts.
+
+Examples:
+
+AWS: aws configure –profile mc-aws-sbx aws sts get-caller-identity
+–profile mc-aws-sbx
+
+Azure: az login
+
+Google Cloud: gcloud auth login
+
+For Terraform, configure authentication for the relevant cloud provider
+before running terraform plan or terraform apply.
+
+SECURITY NOTES
+
+-   Do not share or commit AWS access keys, Azure credentials, or Google
+    credentials.
+-   Do not upload secret files such as ~/.aws/credentials to Git.
+-   Prefer temporary credentials, IAM roles, or enterprise SSO where
+    appropriate.
+-   Check that the machine architecture matches the AWS CLI installer
+    (x86_64 or ARM64).
